@@ -64,7 +64,7 @@ type ImportResult = {
   };
   inserted: number;
   updated: number;
-  skipped: number;
+  unchanged: number;
   failed: FailedRow[];
 };
 
@@ -82,19 +82,27 @@ const SECTION_LINK_REGEX = /\/section-([\d.\-A-Za-z]+)/i;
 
 const cleanText = (value: string): string => value.replace(/\s+/g, ' ').trim();
 
+const canonicalizeContent = (value?: string): string =>
+  (value ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
 const hashSection = (parsed: ParsedSection): string =>
   createHash('sha256')
     .update(
       JSON.stringify({
-        sectionNumber: parsed.sectionNumber,
         titleNumber: parsed.titleNumber,
+        titleName: parsed.titleName,
         chapterNumber: parsed.chapterNumber,
+        chapterName: parsed.chapterName,
+        sectionNumber: parsed.sectionNumber,
         heading: parsed.heading,
-        body: parsed.body,
-        plainText: parsed.plainText,
+        body: canonicalizeContent(parsed.body),
+        plainText: canonicalizeContent(parsed.plainText),
         effectiveDate: parsed.effectiveDate,
         latestBill: parsed.latestBill,
-        sourceUrl: parsed.sourceUrl,
       }),
     )
     .digest('hex');
@@ -350,14 +358,25 @@ const parseSection = (html: string, section: SectionLink): ParsedSection => {
   };
 };
 
-const upsertSection = async (parsed: ParsedSection): Promise<'inserted' | 'updated' | 'skipped'> => {
+const upsertSection = async (parsed: ParsedSection): Promise<'inserted' | 'updated' | 'unchanged'> => {
   const nextHash = hashSection(parsed);
   const orcCode = (prisma as unknown as {
     orcCode: {
       findUnique: (args: unknown) => Promise<{ id: string; hash: string } | null>;
-      upsert: (args: unknown) => Promise<unknown>;
+      create: (args: unknown) => Promise<unknown>;
+      update: (args: unknown) => Promise<unknown>;
     };
   }).orcCode;
+
+  const plainText = [
+    parsed.heading,
+    parsed.plainText,
+    parsed.effectiveDate ? `Effective: ${parsed.effectiveDate}` : undefined,
+    parsed.latestBill ? `Latest Bill: ${parsed.latestBill}` : undefined,
+    `Source: ${parsed.sourceUrl}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   const existing = await orcCode.findUnique({
     where: { sectionNumber: parsed.sectionNumber },
@@ -365,49 +384,41 @@ const upsertSection = async (parsed: ParsedSection): Promise<'inserted' | 'updat
   });
 
   if (existing?.hash === nextHash) {
-    return 'skipped';
+    return 'unchanged';
   }
 
-  await orcCode.upsert({
+  if (!existing) {
+    await orcCode.create({
+      data: {
+        sectionNumber: parsed.sectionNumber,
+        titleNumber: parsed.titleNumber,
+        titleName: parsed.titleName,
+        chapterNumber: parsed.chapterNumber,
+        chapterName: parsed.chapterName,
+        body: parsed.body,
+        plainText,
+        hash: nextHash,
+      },
+    });
+
+    return 'inserted';
+  }
+
+  await orcCode.update({
     where: { sectionNumber: parsed.sectionNumber },
-    create: {
+    data: {
       sectionNumber: parsed.sectionNumber,
       titleNumber: parsed.titleNumber,
       titleName: parsed.titleName,
       chapterNumber: parsed.chapterNumber,
       chapterName: parsed.chapterName,
       body: parsed.body,
-      plainText: [
-        parsed.heading,
-        parsed.plainText,
-        parsed.effectiveDate ? `Effective: ${parsed.effectiveDate}` : undefined,
-        parsed.latestBill ? `Latest Bill: ${parsed.latestBill}` : undefined,
-        `Source: ${parsed.sourceUrl}`,
-      ]
-        .filter(Boolean)
-        .join('\n'),
-      hash: nextHash,
-    },
-    update: {
-      titleNumber: parsed.titleNumber,
-      titleName: parsed.titleName,
-      chapterNumber: parsed.chapterNumber,
-      chapterName: parsed.chapterName,
-      body: parsed.body,
-      plainText: [
-        parsed.heading,
-        parsed.plainText,
-        parsed.effectiveDate ? `Effective: ${parsed.effectiveDate}` : undefined,
-        parsed.latestBill ? `Latest Bill: ${parsed.latestBill}` : undefined,
-        `Source: ${parsed.sourceUrl}`,
-      ]
-        .filter(Boolean)
-        .join('\n'),
+      plainText,
       hash: nextHash,
     },
   });
 
-  return existing ? 'updated' : 'inserted';
+  return 'updated';
 };
 
 const run = async (): Promise<void> => {
@@ -416,7 +427,7 @@ const run = async (): Promise<void> => {
     discovered: { titles: 0, chapters: 0, sections: 0 },
     inserted: 0,
     updated: 0,
-    skipped: 0,
+    unchanged: 0,
     failed: [],
   };
 
@@ -547,8 +558,19 @@ const run = async (): Promise<void> => {
     discovered: result.discovered,
     inserted: result.inserted,
     updated: result.updated,
-    skipped: result.skipped,
+    unchanged: result.unchanged,
     failed: result.failed.length,
+  });
+
+  log('info', 'import.summary', {
+    discoveredTitles: result.discovered.titles,
+    discoveredChapters: result.discovered.chapters,
+    discoveredSections: result.discovered.sections,
+    inserted: result.inserted,
+    updated: result.updated,
+    unchanged: result.unchanged,
+    failed: result.failed.length,
+    processed: result.inserted + result.updated + result.unchanged + result.failed.length,
   });
 
   if (result.failed.length > 0) {
