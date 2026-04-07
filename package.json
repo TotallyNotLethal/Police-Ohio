@@ -12,7 +12,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:generate": "prisma generate",
     "prisma:studio": "prisma studio",
-    "prisma:seed": "prisma db seed"
+    "prisma:seed": "prisma db seed",
+    "import:orc": "tsx scripts/import-orc.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.6.0",
@@ -37,7 +38,8 @@
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "tsx": "^4.20.3"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
