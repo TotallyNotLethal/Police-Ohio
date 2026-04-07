@@ -1,9 +1,14 @@
+import { notFound } from 'next/navigation';
+
 import CacheButton from '../../../components/CacheButton';
 import FavoriteButton from '../../../components/FavoriteButton';
+import ReferenceDisclaimerBanner from '../../../components/ReferenceDisclaimerBanner';
 import SectionDetailTabs from '../../../components/SectionDetailTabs';
 import SectionHeader from '../../../components/SectionHeader';
 import SectionActivityTracker from '../../../components/offline/SectionActivityTracker';
 import SectionMetadata from '../../../components/SectionMetadata';
+import { prisma } from '../../../lib/db/prisma';
+import { canonicalUrlForSection, normalizeSectionNumber } from '../../../lib/orc/normalizer';
 
 interface SectionPageProps {
   params: Promise<{
@@ -11,41 +16,87 @@ interface SectionPageProps {
   }>;
 }
 
+interface StatuteNode {
+  marker: string;
+  text: string;
+  children?: StatuteNode[];
+}
+
+const formatTimestamp = (value?: Date | null) => {
+  if (!value) {
+    return null;
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'UTC',
+  }).format(value);
+};
+
+const buildOfficialBlocks = (bodyText: string): StatuteNode[] => {
+  const lines = bodyText
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const blocks = lines.map((line, index) => {
+    const markerMatch = line.match(/^\(([A-Za-z0-9]+)\)\s*(.+)$/);
+    if (markerMatch) {
+      return { marker: `(${markerMatch[1]})`, text: markerMatch[2] };
+    }
+
+    return { marker: `(${index + 1})`, text: line };
+  });
+
+  return blocks.length > 0 ? blocks : [{ marker: '(1)', text: 'Official statutory text unavailable.' }];
+};
+
 export default async function SectionPage({ params }: SectionPageProps) {
   const { sectionNumber } = await params;
+  const normalizedSectionNumber = normalizeSectionNumber(sectionNumber);
+
+  const section = await prisma.orcSection.findFirst({
+    where: { sectionNumber: normalizedSectionNumber },
+    include: {
+      outboundRefs: {
+        orderBy: { targetLabel: 'asc' },
+        select: { targetLabel: true },
+      },
+    },
+  });
+
+  if (!section) {
+    notFound();
+  }
+
+  const tags = (section.tags ?? {}) as Record<string, unknown>;
+  const renderBlocks = (section.renderBlocks ?? {}) as Record<string, unknown>;
+
+  const summary = typeof renderBlocks.summary === 'string' ? renderBlocks.summary : 'No app summary available.';
+  const bodyText = section.bodyText?.trim() ?? '';
+  const officialBlocks = buildOfficialBlocks(bodyText);
 
   return (
     <main className="space-y-6">
-      <SectionActivityTracker sectionNumber={sectionNumber} />
-      <SectionHeader sectionNumber={sectionNumber} title="Statutory Section Detail" />
-      <SectionMetadata enacted="January 1, 1974" updated="March 20, 2026" source="Ohio Revised Code" />
+      <SectionActivityTracker sectionNumber={normalizedSectionNumber} />
+      <SectionHeader sectionNumber={normalizedSectionNumber} title={section.heading} />
+      <ReferenceDisclaimerBanner />
+      <SectionMetadata
+        officialSourceUrl={canonicalUrlForSection(normalizedSectionNumber)}
+        authenticatedPdfUrl={typeof tags.pdfUrl === 'string' ? tags.pdfUrl : null}
+        lastIngestedAt={formatTimestamp(section.ingestedAt)}
+        effectiveDate={typeof tags.effectiveDate === 'string' ? tags.effectiveDate : null}
+        latestLegislation={typeof tags.latestLegislation === 'string' ? tags.latestLegislation : null}
+      />
       <div className="flex flex-wrap gap-2">
-        <FavoriteButton sectionNumber={sectionNumber} />
-        <CacheButton sectionNumber={sectionNumber} title="Statutory Section Detail" />
+        <FavoriteButton sectionNumber={normalizedSectionNumber} />
+        <CacheButton sectionNumber={normalizedSectionNumber} title={section.heading} />
       </div>
       <SectionDetailTabs
-        summary="This section outlines prohibited conduct, exceptions, and enforcement conditions relevant to the designated offense category."
-        references={['2901.01', '2901.02', '2923.12']}
-        blocks={[
-          {
-            marker: '(A)',
-            text: 'No person shall knowingly engage in the prohibited conduct described in this section.',
-            children: [
-              {
-                marker: '(1)',
-                text: 'Applies when conduct is directed toward a protected person.',
-                children: [
-                  {
-                    marker: '(a)',
-                    text: 'Includes direct acts and attempts to cause physical harm.',
-                    children: [{ marker: '(i)', text: 'Evidence may include witness statements and visible injury.' }],
-                  },
-                ],
-              },
-            ],
-          },
-          { marker: '(B)', text: 'Whoever violates this section is subject to penalties under related chapters.' },
-        ]}
+        summary={summary}
+        references={section.outboundRefs.map((ref) => ref.targetLabel).filter((label): label is string => Boolean(label))}
+        blocks={officialBlocks}
       />
     </main>
   );
