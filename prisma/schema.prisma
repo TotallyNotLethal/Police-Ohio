@@ -250,3 +250,21 @@ model ParserWarningLog {
   @@index([ingestionRunId, sectionNumber])
   @@index([severity, createdAt])
 }
+
+model OrcCode {
+  id             String   @id @default(cuid())
+  sectionNumber  String   @unique
+  titleNumber    String?
+  titleName      String?
+  chapterNumber  String?
+  chapterName    String?
+  body           String   @db.LongText
+  plainText      String   @db.LongText
+  hash           String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([sectionNumber])
+  @@index([chapterNumber])
+  @@index([titleNumber])
+}
