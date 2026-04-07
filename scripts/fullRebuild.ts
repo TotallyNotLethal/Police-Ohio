@@ -6,9 +6,9 @@ import { deriveTaxonomyFromSection, normalizeSectionNumber } from '../src/lib/or
 import { parseOrcSectionHtml } from '../src/lib/orc/parser';
 import { extractCrossReferences } from '../src/lib/orc/references';
 
-const TITLE_LINK_REGEX = /href=["']([^"']*\/title-(\d+[A-Za-z]?))["']/gi;
-const CHAPTER_LINK_REGEX = /href=["']([^"']*\/chapter-(\d+[A-Za-z]?))["']/gi;
-const SECTION_LINK_REGEX = /href=["']([^"']*\/section-([\d.\-A-Za-z]+))["']/gi;
+const TITLE_LINK_REGEX = /href=["']([^"']*title-(\d+[A-Za-z]?))["']/gi;
+const CHAPTER_LINK_REGEX = /href=["']([^"']*chapter-(\d+[A-Za-z]?))["']/gi;
+const SECTION_LINK_REGEX = /href=["']([^"']*section-([\d.\-A-Za-z]+))["']/gi;
 
 const toAbsoluteUrl = (href: string) =>
   href.startsWith('http') ? href : `https://codes.ohio.gov${href.startsWith('/') ? '' : '/'}${href}`;
