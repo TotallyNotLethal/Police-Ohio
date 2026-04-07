@@ -1,0 +1,158 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  EDITOR
+  ADMIN
+}
+
+model User {
+  id             String          @id @default(cuid())
+  email          String          @unique
+  name           String?
+  role           UserRole        @default(USER)
+  agencyId       String?
+  agency         Agency?         @relation(fields: [agencyId], references: [id], onDelete: SetNull)
+  favorites      Favorite[]
+  searchHistory  SearchHistory[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+model Agency {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  users       User[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([name])
+}
+
+model OrcTitle {
+  id               String       @id @default(cuid())
+  titleNumber      String       @unique
+  slug             String       @unique
+  name             String
+  parsedNodes      Json?
+  renderBlocks     Json?
+  tags             Json?
+  aliases          Json?
+  sourceHash       String?
+  contentVersion   Int          @default(1)
+  sourceUpdatedAt  DateTime?
+  ingestedAt       DateTime?
+  chapters         OrcChapter[]
+  sections         OrcSection[]
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+}
+
+model OrcChapter {
+  id               String       @id @default(cuid())
+  titleId          String
+  title            OrcTitle     @relation(fields: [titleId], references: [id], onDelete: Cascade)
+  chapterNumber    String
+  slug             String
+  name             String
+  parsedNodes      Json?
+  renderBlocks     Json?
+  tags             Json?
+  aliases          Json?
+  sourceHash       String?
+  contentVersion   Int          @default(1)
+  sourceUpdatedAt  DateTime?
+  ingestedAt       DateTime?
+  sections         OrcSection[]
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@unique([titleId, chapterNumber])
+  @@unique([titleId, slug])
+}
+
+model OrcSection {
+  id               String           @id @default(cuid())
+  titleId          String
+  chapterId        String
+  title            OrcTitle         @relation(fields: [titleId], references: [id], onDelete: Cascade)
+  chapter          OrcChapter       @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  sectionNumber    String
+  slug             String
+  heading          String
+  bodyText         String?
+  parsedNodes      Json?
+  renderBlocks     Json?
+  tags             Json?
+  aliases          Json?
+  sourceHash       String?
+  contentVersion   Int              @default(1)
+  sourceUpdatedAt  DateTime?
+  ingestedAt       DateTime?
+  outboundRefs     CrossReference[] @relation("CrossReferenceSource")
+  inboundRefs      CrossReference[] @relation("CrossReferenceTarget")
+  favorites        Favorite[]
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@unique([chapterId, sectionNumber])
+  @@unique([titleId, slug])
+}
+
+model CrossReference {
+  id               String      @id @default(cuid())
+  sourceSectionId  String
+  targetSectionId  String?
+  sourceSection    OrcSection  @relation("CrossReferenceSource", fields: [sourceSectionId], references: [id], onDelete: Cascade)
+  targetSection    OrcSection? @relation("CrossReferenceTarget", fields: [targetSectionId], references: [id], onDelete: SetNull)
+  citationText     String
+  targetLabel      String?
+  targetUrl        String?
+  parsedNodes      Json?
+  tags             Json?
+  sourceHash       String?
+  contentVersion   Int         @default(1)
+  ingestedAt       DateTime?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@index([sourceSectionId])
+  @@index([targetSectionId])
+}
+
+model Favorite {
+  id          String     @id @default(cuid())
+  userId      String
+  sectionId   String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  section     OrcSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  pinned      Boolean    @default(false)
+  pinOrder    Int?
+  note        String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@unique([userId, sectionId])
+  @@index([userId, pinned, pinOrder])
+}
+
+model SearchHistory {
+  id          String    @id @default(cuid())
+  userId      String?
+  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  query       String
+  filters     Json?
+  resultMeta  Json?
+  createdAt   DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([query])
+}
