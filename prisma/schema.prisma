@@ -156,3 +156,97 @@ model SearchHistory {
   @@index([userId, createdAt])
   @@index([query])
 }
+
+
+enum IngestionRunStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+enum ParserWarningSeverity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model IngestionRun {
+  id                    String               @id @default(cuid())
+  trigger               String
+  status                IngestionRunStatus   @default(RUNNING)
+  startedAt             DateTime             @default(now())
+  completedAt           DateTime?
+  visitedCount          Int                  @default(0)
+  ingestedCount         Int                  @default(0)
+  changedCount          Int                  @default(0)
+  parseFailureCount     Int                  @default(0)
+  missingMetadataCount  Int                  @default(0)
+  warningCount          Int                  @default(0)
+  notes                 String?
+  changedStatutes       ChangedStatute[]
+  parseFailures         ParseFailureLog[]
+  metadataIssues        MissingMetadataLog[]
+  parserWarnings        ParserWarningLog[]
+
+  @@index([startedAt])
+  @@index([status, startedAt])
+}
+
+model ChangedStatute {
+  id                String       @id @default(cuid())
+  ingestionRunId    String
+  ingestionRun      IngestionRun @relation(fields: [ingestionRunId], references: [id], onDelete: Cascade)
+  sectionId         String?
+  sectionNumber     String
+  oldHash           String?
+  newHash           String
+  previousVersion   Int?
+  nextVersion       Int?
+  diffSummary       String?
+  createdAt         DateTime     @default(now())
+
+  @@index([ingestionRunId, sectionNumber])
+}
+
+model ParseFailureLog {
+  id                String       @id @default(cuid())
+  ingestionRunId    String
+  ingestionRun      IngestionRun @relation(fields: [ingestionRunId], references: [id], onDelete: Cascade)
+  sectionNumber     String?
+  url               String?
+  errorMessage      String
+  payload           Json?
+  createdAt         DateTime     @default(now())
+
+  @@index([ingestionRunId, createdAt])
+}
+
+model MissingMetadataLog {
+  id                String       @id @default(cuid())
+  ingestionRunId    String
+  ingestionRun      IngestionRun @relation(fields: [ingestionRunId], references: [id], onDelete: Cascade)
+  sectionId         String?
+  sectionNumber     String
+  missingFields     Json
+  details           Json?
+  createdAt         DateTime     @default(now())
+
+  @@index([ingestionRunId, sectionNumber])
+}
+
+model ParserWarningLog {
+  id                String                @id @default(cuid())
+  ingestionRunId    String
+  ingestionRun      IngestionRun          @relation(fields: [ingestionRunId], references: [id], onDelete: Cascade)
+  sectionId         String?
+  sectionNumber     String
+  code              String
+  severity          ParserWarningSeverity
+  message           String
+  evidence          String?
+  details           Json?
+  createdAt         DateTime              @default(now())
+
+  @@index([ingestionRunId, sectionNumber])
+  @@index([severity, createdAt])
+}

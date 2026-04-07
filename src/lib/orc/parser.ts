@@ -4,7 +4,7 @@ export type ParseWarningCode =
   | 'MISSING_SECTION_NUMBER'
   | 'MISSING_HEADING'
   | 'MISSING_BODY'
-  | 'LOW_CONFIDENCE_BODY_MATCH'
+  | 'LOW_CONFIDENCE_STRUCTURE'
   | 'MISSING_EFFECTIVE_DATE'
   | 'MISSING_LATEST_LEGISLATION'
   | 'MISSING_PDF_LINK';
@@ -14,6 +14,7 @@ export type ParseWarning = {
   message: string;
   confidence: 'low' | 'medium' | 'high';
   evidence?: string;
+  details?: Record<string, unknown>;
 };
 
 export type ParsedOrcSection = {
@@ -23,6 +24,8 @@ export type ParsedOrcSection = {
   effectiveDate?: string;
   latestLegislation?: string;
   pdfUrl?: string;
+  parserConfidence: 'low' | 'medium' | 'high';
+  structureMatched: boolean;
   warnings: ParseWarning[];
 };
 
@@ -52,21 +55,32 @@ const pickFirst = (html: string, patterns: RegExp[]): string | undefined => {
   return undefined;
 };
 
-const extractBodyHtml = (html: string): string | undefined => {
+const extractBodyHtml = (html: string): { bodyHtml?: string; matchedPattern?: string } => {
   const patterns = [
-    /<section[^>]*class=["'][^"']*(?:section-body|content-body|law-content)[^"']*["'][^>]*>([\s\S]*?)<\/section>/i,
-    /<div[^>]*class=["'][^"']*(?:section-body|content-body|law-content|main-content)[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
-    /<article[^>]*>([\s\S]*?)<\/article>/i,
+    {
+      pattern:
+        /<section[^>]*class=["'][^"']*(?:section-body|content-body|law-content)[^"']*["'][^>]*>([\s\S]*?)<\/section>/i,
+      label: 'section.section-body/content-body/law-content',
+    },
+    {
+      pattern:
+        /<div[^>]*class=["'][^"']*(?:section-body|content-body|law-content|main-content)[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+      label: 'div.section-body/content-body/law-content/main-content',
+    },
+    {
+      pattern: /<article[^>]*>([\s\S]*?)<\/article>/i,
+      label: 'article',
+    },
   ];
 
-  for (const pattern of patterns) {
-    const match = html.match(pattern);
+  for (const entry of patterns) {
+    const match = html.match(entry.pattern);
     if (match?.[1]) {
-      return match[1];
+      return { bodyHtml: match[1], matchedPattern: entry.label };
     }
   }
 
-  return undefined;
+  return {};
 };
 
 export const parseOrcSectionHtml = (html: string): ParsedOrcSection => {
@@ -102,7 +116,7 @@ export const parseOrcSectionHtml = (html: string): ParsedOrcSection => {
     });
   }
 
-  const bodyHtml = extractBodyHtml(html);
+  const { bodyHtml, matchedPattern } = extractBodyHtml(html);
   if (!bodyHtml) {
     warnings.push({
       code: 'MISSING_BODY',
@@ -111,14 +125,18 @@ export const parseOrcSectionHtml = (html: string): ParsedOrcSection => {
     });
   }
 
-  const rawOfficialText = stripHtml(bodyHtml ?? html);
+  const rawOfficialText = bodyHtml ? stripHtml(bodyHtml) : '';
 
-  if (!bodyHtml && rawOfficialText.length > 0) {
+  if (!bodyHtml) {
     warnings.push({
-      code: 'LOW_CONFIDENCE_BODY_MATCH',
-      message: 'Falling back to full document text; body extraction confidence is low.',
+      code: 'LOW_CONFIDENCE_STRUCTURE',
+      message: 'Parser confidence is low. Structured body text was not inferred from unknown HTML layout.',
       confidence: 'low',
-      evidence: rawOfficialText.slice(0, 240),
+      evidence: stripHtml(html).slice(0, 240),
+      details: {
+        expectedContainers: ['section-body', 'content-body', 'law-content', 'main-content', 'article'],
+        action: 'manual-review-required',
+      },
     });
   }
 
@@ -159,6 +177,8 @@ export const parseOrcSectionHtml = (html: string): ParsedOrcSection => {
     effectiveDate,
     latestLegislation,
     pdfUrl,
+    parserConfidence: bodyHtml ? 'high' : 'low',
+    structureMatched: Boolean(bodyHtml),
     warnings,
   };
 };
