@@ -88,6 +88,8 @@ export const persistParsedSection = async ({
       },
       parsedNodes: {
         warnings: parsed.warnings,
+        parserConfidence: parsed.parserConfidence,
+        structureMatched: parsed.structureMatched,
       },
       renderBlocks: {
         summary: summarizeSection(parsed.heading, parsed.rawOfficialText),
@@ -106,6 +108,8 @@ export const persistParsedSection = async ({
       },
       parsedNodes: {
         warnings: parsed.warnings,
+        parserConfidence: parsed.parserConfidence,
+        structureMatched: parsed.structureMatched,
       },
       renderBlocks: {
         summary: summarizeSection(parsed.heading, parsed.rawOfficialText),
