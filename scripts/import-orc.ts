@@ -1,13 +1,17 @@
 import { createHash } from 'node:crypto';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 
 import axios, { type AxiosInstance } from 'axios';
 import * as cheerio from 'cheerio';
-import pLimit from 'p-limit';
 
 import { prisma } from '../src/lib/db/prisma';
 
 const ROOT_URL = 'https://codes.ohio.gov/ohio-revised-code';
-const MAX_CONCURRENCY = 4;
+const REQUEST_DELAY_MS = 300;
+const RETRY_BASE_DELAY_MS = 500;
+const MAX_HTTP_RETRIES = 4;
+const PROGRESS_FILE = path.resolve(__dirname, 'orc-progress.json');
 
 type TitleLink = {
   titleNumber: string;
@@ -64,6 +68,12 @@ type ImportResult = {
   failed: FailedRow[];
 };
 
+type ImportProgress = {
+  lastTitle: string;
+  lastChapter: string;
+  lastSection: string;
+};
+
 type LogLevel = 'info' | 'warn' | 'error';
 
 const TITLE_LINK_REGEX = /\/title-(\d+[A-Za-z]?)/i;
@@ -102,6 +112,60 @@ const log = (level: LogLevel, event: string, payload: Record<string, unknown> = 
 
 const toAbsoluteUrl = (href: string): string => new URL(href, ROOT_URL).toString();
 
+const delay = async (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+const compareOrdinals = (left: string, right: string): number =>
+  left.localeCompare(right, undefined, { numeric: true });
+
+const isTransientHttpError = (error: unknown): boolean => {
+  if (!axios.isAxiosError(error)) {
+    return false;
+  }
+
+  const status = error.response?.status;
+  if (status && (status === 429 || status >= 500)) {
+    return true;
+  }
+
+  const code = error.code;
+  return code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'ECONNABORTED' || code === 'EAI_AGAIN';
+};
+
+const readProgress = async (): Promise<ImportProgress | null> => {
+  try {
+    const raw = await fs.readFile(PROGRESS_FILE, 'utf8');
+    const parsed = JSON.parse(raw) as Partial<ImportProgress>;
+
+    if (
+      typeof parsed.lastTitle === 'string' &&
+      typeof parsed.lastChapter === 'string' &&
+      typeof parsed.lastSection === 'string'
+    ) {
+      return {
+        lastTitle: parsed.lastTitle,
+        lastChapter: parsed.lastChapter,
+        lastSection: parsed.lastSection,
+      };
+    }
+
+    log('warn', 'checkpoint.invalid', { file: PROGRESS_FILE });
+    return null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+
+    throw error;
+  }
+};
+
+const writeProgress = async (progress: ImportProgress): Promise<void> => {
+  await fs.writeFile(PROGRESS_FILE, `${JSON.stringify(progress, null, 2)}\n`, 'utf8');
+};
+
 const createHttp = (): AxiosInstance =>
   axios.create({
     timeout: 20_000,
@@ -112,8 +176,32 @@ const createHttp = (): AxiosInstance =>
   });
 
 const fetchHtml = async (http: AxiosInstance, url: string): Promise<string> => {
-  const response = await http.get<string>(url);
-  return response.data;
+  for (let attempt = 1; attempt <= MAX_HTTP_RETRIES; attempt += 1) {
+    await delay(REQUEST_DELAY_MS);
+
+    try {
+      const response = await http.get<string>(url);
+      return response.data;
+    } catch (error) {
+      const retryable = isTransientHttpError(error);
+      const isLastAttempt = attempt === MAX_HTTP_RETRIES;
+
+      if (!retryable || isLastAttempt) {
+        throw error;
+      }
+
+      const backoffMs = RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
+      log('warn', 'http.retry', {
+        url,
+        attempt,
+        backoffMs,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await delay(backoffMs);
+    }
+  }
+
+  throw new Error(`Failed to fetch ${url}`);
 };
 
 const discoverTitles = async (http: AxiosInstance): Promise<TitleLink[]> => {
@@ -141,7 +229,7 @@ const discoverTitles = async (http: AxiosInstance): Promise<TitleLink[]> => {
     });
   });
 
-  return [...titles.values()].sort((a, b) => a.titleNumber.localeCompare(b.titleNumber, undefined, { numeric: true }));
+  return [...titles.values()].sort((a, b) => compareOrdinals(a.titleNumber, b.titleNumber));
 };
 
 const discoverChapters = async (http: AxiosInstance, title: TitleLink): Promise<ChapterLink[]> => {
@@ -171,7 +259,7 @@ const discoverChapters = async (http: AxiosInstance, title: TitleLink): Promise<
     });
   });
 
-  return [...chapters.values()].sort((a, b) => a.chapterNumber.localeCompare(b.chapterNumber, undefined, { numeric: true }));
+  return [...chapters.values()].sort((a, b) => compareOrdinals(a.chapterNumber, b.chapterNumber));
 };
 
 const discoverSections = async (http: AxiosInstance, chapter: ChapterLink): Promise<SectionLink[]> => {
@@ -202,7 +290,7 @@ const discoverSections = async (http: AxiosInstance, chapter: ChapterLink): Prom
     });
   });
 
-  return [...sections.values()].sort((a, b) => a.sectionNumber.localeCompare(b.sectionNumber, undefined, { numeric: true }));
+  return [...sections.values()].sort((a, b) => compareOrdinals(a.sectionNumber, b.sectionNumber));
 };
 
 const extractBodyHtml = ($: cheerio.CheerioAPI): string => {
@@ -332,64 +420,103 @@ const run = async (): Promise<void> => {
     failed: [],
   };
 
-  log('info', 'import.start', { rootUrl: ROOT_URL, concurrency: MAX_CONCURRENCY });
+  log('info', 'import.start', { rootUrl: ROOT_URL, requestDelayMs: REQUEST_DELAY_MS });
 
   const titles = await discoverTitles(http);
   result.discovered.titles = titles.length;
   log('info', 'discover.titles.complete', { count: titles.length });
 
-  const chapters = (
-    await Promise.all(
-      titles.map(async (title) => {
-        try {
-          return await discoverChapters(http, title);
-        } catch (error) {
-          log('warn', 'discover.chapters.failed', {
-            titleNumber: title.titleNumber,
-            url: title.url,
-            error: error instanceof Error ? error.message : String(error),
+  const checkpoint = await readProgress();
+  let hasPassedCheckpoint = !checkpoint;
+
+  log('info', 'checkpoint.state', {
+    file: PROGRESS_FILE,
+    checkpoint,
+  });
+
+  for (const title of titles) {
+    if (checkpoint && !hasPassedCheckpoint && compareOrdinals(title.titleNumber, checkpoint.lastTitle) < 0) {
+      continue;
+    }
+
+    let chapters: ChapterLink[] = [];
+    try {
+      chapters = await discoverChapters(http, title);
+    } catch (error) {
+      log('warn', 'discover.chapters.failed', {
+        titleNumber: title.titleNumber,
+        url: title.url,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      continue;
+    }
+
+    result.discovered.chapters += chapters.length;
+
+    for (const chapter of chapters) {
+      if (
+        checkpoint &&
+        !hasPassedCheckpoint &&
+        compareOrdinals(title.titleNumber, checkpoint.lastTitle) === 0 &&
+        compareOrdinals(chapter.chapterNumber, checkpoint.lastChapter) < 0
+      ) {
+        continue;
+      }
+
+      let sections: SectionLink[] = [];
+      try {
+        sections = await discoverSections(http, chapter);
+      } catch (error) {
+        log('warn', 'discover.sections.failed', {
+          chapterNumber: chapter.chapterNumber,
+          titleNumber: chapter.titleNumber,
+          url: chapter.url,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        continue;
+      }
+
+      result.discovered.sections += sections.length;
+
+      for (const section of sections) {
+        if (!hasPassedCheckpoint && checkpoint) {
+          const titleCmp = compareOrdinals(section.titleNumber, checkpoint.lastTitle);
+          if (titleCmp < 0) {
+            continue;
+          }
+
+          if (titleCmp === 0) {
+            const chapterCmp = compareOrdinals(section.chapterNumber, checkpoint.lastChapter);
+            if (chapterCmp < 0) {
+              continue;
+            }
+
+            if (chapterCmp === 0 && compareOrdinals(section.sectionNumber, checkpoint.lastSection) <= 0) {
+              continue;
+            }
+          }
+
+          hasPassedCheckpoint = true;
+          log('info', 'checkpoint.resume', {
+            from: checkpoint,
+            nextTitle: section.titleNumber,
+            nextChapter: section.chapterNumber,
+            nextSection: section.sectionNumber,
           });
-          return [];
         }
-      }),
-    )
-  ).flat();
 
-  result.discovered.chapters = chapters.length;
-  log('info', 'discover.chapters.complete', { count: chapters.length });
-
-  const sections = (
-    await Promise.all(
-      chapters.map(async (chapter) => {
-        try {
-          return await discoverSections(http, chapter);
-        } catch (error) {
-          log('warn', 'discover.sections.failed', {
-            chapterNumber: chapter.chapterNumber,
-            titleNumber: chapter.titleNumber,
-            url: chapter.url,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          return [];
-        }
-      }),
-    )
-  ).flat();
-
-  result.discovered.sections = sections.length;
-  log('info', 'discover.sections.complete', { count: sections.length });
-
-  const limit = pLimit(MAX_CONCURRENCY);
-
-  await Promise.all(
-    sections.map((section) =>
-      limit(async () => {
         try {
           const html = await fetchHtml(http, section.url);
           const parsed = parseSection(html, section);
 
           const operation = await upsertSection(parsed);
           result[operation] += 1;
+
+          await writeProgress({
+            lastTitle: section.titleNumber,
+            lastChapter: section.chapterNumber,
+            lastSection: section.sectionNumber,
+          });
 
           log('info', `row.${operation}`, {
             sectionNumber: parsed.sectionNumber,
@@ -409,9 +536,12 @@ const run = async (): Promise<void> => {
 
           log('error', 'row.failed', failure);
         }
-      }),
-    ),
-  );
+      }
+    }
+  }
+
+  log('info', 'discover.chapters.complete', { count: result.discovered.chapters });
+  log('info', 'discover.sections.complete', { count: result.discovered.sections });
 
   log('info', 'import.complete', {
     discovered: result.discovered,
