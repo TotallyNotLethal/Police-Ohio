@@ -2,6 +2,7 @@ import CacheButton from '../../../components/CacheButton';
 import FavoriteButton from '../../../components/FavoriteButton';
 import SectionDetailTabs from '../../../components/SectionDetailTabs';
 import SectionHeader from '../../../components/SectionHeader';
+import SectionActivityTracker from '../../../components/offline/SectionActivityTracker';
 import SectionMetadata from '../../../components/SectionMetadata';
 
 interface SectionPageProps {
@@ -15,11 +16,12 @@ export default async function SectionPage({ params }: SectionPageProps) {
 
   return (
     <main className="space-y-6">
+      <SectionActivityTracker sectionNumber={sectionNumber} />
       <SectionHeader sectionNumber={sectionNumber} title="Statutory Section Detail" />
       <SectionMetadata enacted="January 1, 1974" updated="March 20, 2026" source="Ohio Revised Code" />
       <div className="flex flex-wrap gap-2">
-        <FavoriteButton />
-        <CacheButton />
+        <FavoriteButton sectionNumber={sectionNumber} />
+        <CacheButton sectionNumber={sectionNumber} title="Statutory Section Detail" />
       </div>
       <SectionDetailTabs
         summary="This section outlines prohibited conduct, exceptions, and enforcement conditions relevant to the designated offense category."

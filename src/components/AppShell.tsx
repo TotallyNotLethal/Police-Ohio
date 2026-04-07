@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { BookText, Clock3, Heart, Home, Settings } from 'lucide-react';
+import { BookText, Clock3, Heart, Home, Settings, WifiOff } from 'lucide-react';
 import GlobalSearchBar from './GlobalSearchBar';
 import OfflineBadge from './OfflineBadge';
 import ThemeToggle from './ThemeToggle';
@@ -9,6 +9,7 @@ const navItems = [
   { href: '/titles', label: 'Titles', icon: BookText },
   { href: '/recent', label: 'Recent', icon: Clock3 },
   { href: '/favorites', label: 'Favorites', icon: Heart },
+  { href: '/offline', label: 'Offline', icon: WifiOff },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -32,7 +33,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <div className="flex items-center gap-2">
               <GlobalSearchBar />
               <ThemeToggle />
-              <OfflineBadge enabled />
+              <OfflineBadge />
             </div>
           </header>
           <main className="flex-1 p-4 md:p-6">{children}</main>
@@ -40,7 +41,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       <nav className="fixed bottom-0 left-0 right-0 border-t border-slate-200 bg-white p-2 md:hidden">
-        <ul className="grid grid-cols-5 gap-1">
+        <ul className="grid grid-cols-6 gap-1">
           {navItems.map(({ href, label, icon: Icon }) => (
             <li key={href}>
               <Link href={href} className="flex flex-col items-center gap-1 rounded-lg py-1 text-[11px] font-medium text-slate-600">
