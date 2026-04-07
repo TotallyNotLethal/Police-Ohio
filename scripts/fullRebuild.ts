@@ -1,24 +1,71 @@
 import { prisma } from '../src/lib/db/prisma';
-import { CODES_OHIO_BASE_URL, OrcCrawler } from '../src/lib/orc/crawler';
+import { CODES_OHIO_BASE_URL, OrcCrawler, chapterUrl, titleUrl } from '../src/lib/orc/crawler';
 import { detectChange } from '../src/lib/orc/change-detector';
 import { persistParsedSection } from '../src/lib/orc/indexer';
 import { deriveTaxonomyFromSection, normalizeSectionNumber } from '../src/lib/orc/normalizer';
 import { parseOrcSectionHtml } from '../src/lib/orc/parser';
 import { extractCrossReferences } from '../src/lib/orc/references';
 
+const TITLE_LINK_REGEX = /href=["']([^"']*\/title-(\d+[A-Za-z]?))["']/gi;
+const CHAPTER_LINK_REGEX = /href=["']([^"']*\/chapter-(\d+[A-Za-z]?))["']/gi;
 const SECTION_LINK_REGEX = /href=["']([^"']*\/section-([\d.\-A-Za-z]+))["']/gi;
+
+const toAbsoluteUrl = (href: string) =>
+  href.startsWith('http') ? href : `https://codes.ohio.gov${href.startsWith('/') ? '' : '/'}${href}`;
+
+const extractMatches = (html: string, pattern: RegExp): Array<{ href: string; id: string }> => {
+  const matches: Array<{ href: string; id: string }> = [];
+  for (const match of html.matchAll(pattern)) {
+    matches.push({ href: toAbsoluteUrl(match[1]), id: match[2] });
+  }
+  return matches;
+};
+
+const discoverSectionNumbers = async (crawler: OrcCrawler): Promise<Set<string>> => {
+  const sectionNumbers = new Set<string>();
+
+  const landing = await crawler.fetchHtml(CODES_OHIO_BASE_URL, { id: 'root' });
+  if (!landing) {
+    throw new Error('Unable to fetch ORC landing page');
+  }
+
+  const discoveredTitles = new Set<string>();
+  for (const match of extractMatches(landing.html, TITLE_LINK_REGEX)) {
+    discoveredTitles.add(match.id);
+  }
+
+  for (const titleNumber of discoveredTitles) {
+    const titlePage = await crawler.fetchHtml(titleUrl(titleNumber), { id: `title-${titleNumber}` });
+    if (!titlePage) {
+      continue;
+    }
+
+    const discoveredChapters = new Set<string>();
+    for (const match of extractMatches(titlePage.html, CHAPTER_LINK_REGEX)) {
+      discoveredChapters.add(match.id);
+    }
+
+    for (const chapterNumber of discoveredChapters) {
+      const chapterPage = await crawler.fetchHtml(chapterUrl(chapterNumber), { id: `chapter-${chapterNumber}` });
+      if (!chapterPage) {
+        continue;
+      }
+
+      for (const match of extractMatches(chapterPage.html, SECTION_LINK_REGEX)) {
+        sectionNumbers.add(normalizeSectionNumber(match.id));
+      }
+    }
+  }
+
+  return sectionNumbers;
+};
 
 const run = async () => {
   const crawler = new OrcCrawler({ logger: console.log, minDelayMs: 900, maxRetries: 5 });
-  const landing = await crawler.fetchHtml(CODES_OHIO_BASE_URL, { id: 'root' });
+  const sectionNumbers = await discoverSectionNumbers(crawler);
 
-  if (!landing) {
-    throw new Error('Unable to fetch codes.ohio.gov landing page');
-  }
-
-  const sectionNumbers = new Set<string>();
-  for (const match of landing.html.matchAll(SECTION_LINK_REGEX)) {
-    sectionNumbers.add(normalizeSectionNumber(match[2]));
+  if (sectionNumbers.size === 0) {
+    throw new Error('Unable to discover any ORC section URLs from titles/chapters');
   }
 
   const results = {
