@@ -1,19 +1,18 @@
 import { createServerClient } from '@supabase/ssr';
-import { NextResponse, type NextRequest } from 'next/server';
+import { type NextRequest, NextResponse } from 'next/server';
 import { getSupabasePublishableKey, getSupabaseUrl } from '@/lib/env/supabase';
 
 const supabaseUrl = getSupabaseUrl();
 const supabaseKey = getSupabasePublishableKey();
 
-export const createClient = (request: NextRequest) => {
-  // Create an unmodified response
+export const updateSession = async (request: NextRequest) => {
   let supabaseResponse = NextResponse.next({
     request: {
       headers: request.headers,
     },
   });
 
-  createServerClient(supabaseUrl!, supabaseKey!, {
+  const supabase = createServerClient(supabaseUrl, supabaseKey, {
     cookies: {
       getAll() {
         return request.cookies.getAll();
@@ -25,6 +24,9 @@ export const createClient = (request: NextRequest) => {
       },
     },
   });
+
+  // Required to proactively refresh auth sessions in middleware.
+  await supabase.auth.getUser();
 
   return supabaseResponse;
 };
