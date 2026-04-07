@@ -64,6 +64,22 @@ export const persistParsedSection = async ({
     },
   });
 
+  const existingSection = await prisma.orcSection.findUnique({
+    where: {
+      chapterId_sectionNumber: {
+        chapterId: chapter.id,
+        sectionNumber: parsed.sectionNumber,
+      },
+    },
+    select: {
+      bodyText: true,
+    },
+  });
+
+  const parsedOfficialText = parsed.rawOfficialText.trim();
+  const officialTextForStorage = parsedOfficialText || existingSection?.bodyText || '';
+  const appSummary = summarizeSection(parsed.heading, officialTextForStorage);
+
   const section = await prisma.orcSection.upsert({
     where: {
       chapterId_sectionNumber: {
@@ -77,7 +93,7 @@ export const persistParsedSection = async ({
       sectionNumber: parsed.sectionNumber,
       slug: slugify(parsed.sectionNumber),
       heading: parsed.heading,
-      bodyText: parsed.rawOfficialText,
+      bodyText: officialTextForStorage,
       sourceHash,
       sourceUpdatedAt: now,
       ingestedAt: now,
@@ -92,12 +108,12 @@ export const persistParsedSection = async ({
         structureMatched: parsed.structureMatched,
       },
       renderBlocks: {
-        summary: summarizeSection(parsed.heading, parsed.rawOfficialText),
+        summary: appSummary,
       },
     },
     update: {
       heading: parsed.heading,
-      bodyText: parsed.rawOfficialText,
+      bodyText: officialTextForStorage,
       sourceHash,
       sourceUpdatedAt: now,
       ingestedAt: now,
@@ -112,7 +128,7 @@ export const persistParsedSection = async ({
         structureMatched: parsed.structureMatched,
       },
       renderBlocks: {
-        summary: summarizeSection(parsed.heading, parsed.rawOfficialText),
+        summary: appSummary,
       },
     },
   });

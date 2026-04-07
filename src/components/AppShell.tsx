@@ -3,6 +3,7 @@ import { BookText, Clock3, Heart, Home, Settings, WifiOff } from 'lucide-react';
 import GlobalSearchBar from './GlobalSearchBar';
 import OfflineBadge from './OfflineBadge';
 import ThemeToggle from './ThemeToggle';
+import ReferenceDisclaimerBanner from './ReferenceDisclaimerBanner';
 
 const navItems = [
   { href: '/', label: 'Home', icon: Home },
@@ -36,7 +37,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <OfflineBadge />
             </div>
           </header>
-          <main className="flex-1 p-4 md:p-6">{children}</main>
+          <main className="flex-1 space-y-4 p-4 md:p-6">
+            <ReferenceDisclaimerBanner />
+            {children}
+          </main>
         </div>
       </div>
 
