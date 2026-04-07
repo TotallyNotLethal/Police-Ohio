@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 
 import { slugify } from './normalizer';
 import type { ParsedOrcSection } from './parser';
@@ -79,6 +80,14 @@ export const persistParsedSection = async ({
   const parsedOfficialText = parsed.rawOfficialText.trim();
   const officialTextForStorage = parsedOfficialText || existingSection?.bodyText || '';
   const appSummary = summarizeSection(parsed.heading, officialTextForStorage);
+  const parsedNodesPayload = JSON.parse(
+    JSON.stringify({
+      warnings: parsed.warnings,
+      parserConfidence: parsed.parserConfidence,
+      structureMatched: parsed.structureMatched,
+    }),
+  ) as Prisma.InputJsonValue;
+  const renderBlocksPayload = JSON.parse(JSON.stringify({ summary: appSummary })) as Prisma.InputJsonValue;
 
   const section = await prisma.orcSection.upsert({
     where: {
@@ -102,14 +111,8 @@ export const persistParsedSection = async ({
         latestLegislation: parsed.latestLegislation,
         pdfUrl: parsed.pdfUrl,
       },
-      parsedNodes: {
-        warnings: parsed.warnings,
-        parserConfidence: parsed.parserConfidence,
-        structureMatched: parsed.structureMatched,
-      },
-      renderBlocks: {
-        summary: appSummary,
-      },
+      parsedNodes: parsedNodesPayload,
+      renderBlocks: renderBlocksPayload,
     },
     update: {
       heading: parsed.heading,
@@ -122,14 +125,8 @@ export const persistParsedSection = async ({
         latestLegislation: parsed.latestLegislation,
         pdfUrl: parsed.pdfUrl,
       },
-      parsedNodes: {
-        warnings: parsed.warnings,
-        parserConfidence: parsed.parserConfidence,
-        structureMatched: parsed.structureMatched,
-      },
-      renderBlocks: {
-        summary: appSummary,
-      },
+      parsedNodes: parsedNodesPayload,
+      renderBlocks: renderBlocksPayload,
     },
   });
 

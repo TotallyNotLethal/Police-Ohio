@@ -1,12 +1,22 @@
 import { mkdir, writeFile } from 'node:fs/promises';
+import type { Prisma } from '@prisma/client';
 
 import { prisma } from '../src/lib/db/prisma';
 import { buildSearchDocument } from '../src/lib/orc/indexer';
 
 const OUTPUT_PATH = 'scripts/.artifacts/search-index.json';
+type SearchSectionRow = Prisma.OrcSectionGetPayload<{
+  select: {
+    id: true;
+    sectionNumber: true;
+    heading: true;
+    bodyText: true;
+    tags: true;
+  };
+}>;
 
 const run = async () => {
-  const sections = await prisma.orcSection.findMany({
+  const sections: SearchSectionRow[] = await prisma.orcSection.findMany({
     select: {
       id: true,
       sectionNumber: true,
@@ -16,7 +26,7 @@ const run = async () => {
     },
   });
 
-  const docs = sections.map((section) => {
+  const docs = sections.map((section: SearchSectionRow) => {
     const meta = (section.tags ?? {}) as Record<string, string | undefined>;
 
     return buildSearchDocument({
