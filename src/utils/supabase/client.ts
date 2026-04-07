@@ -4,4 +4,4 @@ import { getSupabasePublishableKey, getSupabaseUrl } from '@/lib/env/supabase';
 const supabaseUrl = getSupabaseUrl();
 const supabaseKey = getSupabasePublishableKey();
 
-export const createClient = () => createBrowserClient(supabaseUrl!, supabaseKey!);
+export const createClient = () => createBrowserClient(supabaseUrl, supabaseKey);

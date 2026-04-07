@@ -6,7 +6,7 @@ const supabaseUrl = getSupabaseUrl();
 const supabaseKey = getSupabasePublishableKey();
 
 export const createClient = (cookieStore: Awaited<ReturnType<typeof cookies>>) => {
-  return createServerClient(supabaseUrl!, supabaseKey!, {
+  return createServerClient(supabaseUrl, supabaseKey, {
     cookies: {
       getAll() {
         return cookieStore.getAll();
