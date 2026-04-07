@@ -1,6 +1,8 @@
 import ReindexButton from '../../components/admin/ReindexButton';
 import { prisma } from '../../lib/db/prisma';
 
+export const dynamic = 'force-dynamic';
+
 const formatTimestamp = (value: Date | null | undefined) => {
   if (!value) {
     return '—';

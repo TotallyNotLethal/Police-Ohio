@@ -14,6 +14,11 @@ const DB_VERSION = 1;
 const FAVORITES = 'favorites';
 const CACHED_SECTIONS = 'cachedSections';
 const RECENT_VIEWS = 'recentViews';
+type SyncCapableRegistration = ServiceWorkerRegistration & {
+  sync: {
+    register: (tag: string) => Promise<void>;
+  };
+};
 
 function canUseIndexedDb() {
   return typeof window !== 'undefined' && 'indexedDB' in window;
@@ -132,7 +137,7 @@ export async function queueSync() {
   try {
     const registration = await navigator.serviceWorker.ready;
     if ('sync' in registration) {
-      await registration.sync.register('offline-sync');
+      await (registration as SyncCapableRegistration).sync.register('offline-sync');
       return;
     }
   } catch {

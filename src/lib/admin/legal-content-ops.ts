@@ -1,4 +1,5 @@
 import { prisma } from '../db/prisma';
+import type { Prisma } from '@prisma/client';
 import { OrcCrawler, sectionUrl } from '../orc/crawler';
 import { detectChange } from '../orc/change-detector';
 import { persistParsedSection } from '../orc/indexer';
@@ -110,7 +111,9 @@ export const runSingleSectionIngestion = async (rawSectionNumber: string) => {
           severity: confidenceToSeverity(warning.confidence),
           message: warning.message,
           evidence: warning.evidence,
-          details: warning.details,
+          details: warning.details
+            ? (JSON.parse(JSON.stringify(warning.details)) as Prisma.InputJsonValue)
+            : undefined,
         })),
       });
     }
