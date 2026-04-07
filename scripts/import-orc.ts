@@ -76,9 +76,9 @@ type ImportProgress = {
 
 type LogLevel = 'info' | 'warn' | 'error';
 
-const TITLE_LINK_REGEX = /\/title-(\d+[A-Za-z]?)/i;
-const CHAPTER_LINK_REGEX = /\/chapter-(\d+[A-Za-z]?)/i;
-const SECTION_LINK_REGEX = /\/section-([\d.\-A-Za-z]+)/i;
+const TITLE_LINK_REGEX = /(?:^|\/)title-(\d+[A-Za-z]?)/i;
+const CHAPTER_LINK_REGEX = /(?:^|\/)chapter-(\d+[A-Za-z]?)/i;
+const SECTION_LINK_REGEX = /(?:^|\/)section-([\d.\-A-Za-z]+)/i;
 
 const cleanText = (value: string): string => value.replace(/\s+/g, ' ').trim();
 

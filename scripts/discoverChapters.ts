@@ -1,6 +1,6 @@
 import { OrcCrawler, titleUrl } from '../src/lib/orc/crawler';
 
-const CHAPTER_LINK_REGEX = /href=["']([^"']*\/chapter-(\d+[A-Za-z]?))["']/gi;
+const CHAPTER_LINK_REGEX = /href=["']([^"']*chapter-(\d+[A-Za-z]?))["']/gi;
 
 const run = async () => {
   const titleNumber = process.argv[2];

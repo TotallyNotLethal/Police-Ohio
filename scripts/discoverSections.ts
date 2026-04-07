@@ -1,6 +1,6 @@
 import { chapterUrl, OrcCrawler } from '../src/lib/orc/crawler';
 
-const SECTION_LINK_REGEX = /href=["']([^"']*\/section-([\d.\-A-Za-z]+))["']/gi;
+const SECTION_LINK_REGEX = /href=["']([^"']*section-([\d.\-A-Za-z]+))["']/gi;
 
 const run = async () => {
   const chapterNumber = process.argv[2];
