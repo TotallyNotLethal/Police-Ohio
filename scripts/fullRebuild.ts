@@ -84,7 +84,7 @@ const discoverSections = async (crawler: OrcCrawler): Promise<Map<string, Discov
 };
 
 const run = async () => {
-  const crawler = new OrcCrawler({ logger: console.log, minDelayMs: 900, maxRetries: 5 });
+  const crawler = new OrcCrawler({ logger: console.log, minDelayMs: 1_400, maxRetries: 8 });
   const sections = await discoverSections(crawler);
 
   if (sections.size === 0) {

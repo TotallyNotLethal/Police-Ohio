@@ -38,6 +38,8 @@ const jitter = (baseMs: number) => Math.floor(baseMs * (0.8 + Math.random() * 0.
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 
+const looksLikeTooManyRequestsPage = (html: string) => /429\s+too\s+many\s+requests/i.test(html);
+
 export class OrcCrawler {
   private readonly seenUrls = new Set<string>();
   private readonly seenHashes = new Set<string>();
@@ -88,6 +90,13 @@ export class OrcCrawler {
 
         const html = await response.text();
         const bodyHash = hash(html);
+
+        if (
+          (response.status === 429 || looksLikeTooManyRequestsPage(html)) &&
+          attempt <= this.options.maxRetries
+        ) {
+          throw new Error('upstream returned 429 Too Many Requests');
+        }
 
         if (!response.ok && response.status >= 500 && attempt <= this.options.maxRetries) {
           throw new Error(`upstream returned ${response.status}`);
