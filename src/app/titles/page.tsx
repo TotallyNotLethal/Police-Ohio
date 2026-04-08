@@ -1,5 +1,6 @@
 import TitleCard from '../../components/TitleCard';
 import { prisma } from '../../lib/db/prisma';
+import { compareCodeNumbers } from '../../lib/orc/sort';
 
 export default async function TitlesPage() {
   const titles = await prisma.orcTitle.findMany({
@@ -8,8 +9,9 @@ export default async function TitlesPage() {
       name: true,
       slug: true,
     },
-    orderBy: { titleNumber: 'asc' },
   });
+
+  const sortedTitles = [...titles].sort((a, b) => compareCodeNumbers(a.titleNumber, b.titleNumber));
 
   return (
     <main className="space-y-4">
@@ -18,7 +20,7 @@ export default async function TitlesPage() {
         <p className="text-sm text-slate-600">No title records found. Run ingestion/full rebuild to populate the database.</p>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
-          {titles.map((title) => (
+          {sortedTitles.map((title) => (
             <TitleCard key={title.slug} titleNumber={title.titleNumber} titleName={title.name} href={`/titles/${title.slug}`} />
           ))}
         </div>
