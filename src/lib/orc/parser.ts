@@ -55,17 +55,25 @@ const pickFirst = (html: string, patterns: RegExp[]): string | undefined => {
   return undefined;
 };
 
+const extractLabeledValue = (html: string, label: string): string | undefined =>
+  pickFirst(html, [
+    new RegExp(
+      `<div[^>]*class=["'][^"']*label[^"']*["'][^>]*>\\s*${label}\\s*:?[\\s\\S]*?<\\/div>\\s*<div[^>]*class=["'][^"']*value[^"']*["'][^>]*>([\\s\\S]*?)<\\/div>`,
+      'i',
+    ),
+  ]);
+
 const extractBodyHtml = (html: string): { bodyHtml?: string; matchedPattern?: string } => {
   const patterns = [
     {
       pattern:
-        /<section[^>]*class=["'][^"']*(?:section-body|content-body|law-content)[^"']*["'][^>]*>([\s\S]*?)<\/section>/i,
-      label: 'section.section-body/content-body/law-content',
+        /<section[^>]*class=["'][^"']*(?:laws-body|section-body|content-body|law-content)[^"']*["'][^>]*>([\s\S]*?)<\/section>/i,
+      label: 'section.laws-body/section-body/content-body/law-content',
     },
     {
       pattern:
-        /<div[^>]*class=["'][^"']*(?:section-body|content-body|law-content|main-content)[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
-      label: 'div.section-body/content-body/law-content/main-content',
+        /<div[^>]*class=["'][^"']*(?:laws-body|section-body|content-body|law-content|main-content)[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+      label: 'div.laws-body/section-body/content-body/law-content/main-content',
     },
     {
       pattern: /<article[^>]*>([\s\S]*?)<\/article>/i,
@@ -126,6 +134,7 @@ export const parseOrcSectionHtml = (html: string): ParsedOrcSection => {
   }
 
   const rawOfficialText = bodyHtml ? stripHtml(bodyHtml) : '';
+  const pageText = stripHtml(html);
 
   if (!bodyHtml) {
     warnings.push({
@@ -134,13 +143,15 @@ export const parseOrcSectionHtml = (html: string): ParsedOrcSection => {
       confidence: 'low',
       evidence: stripHtml(html).slice(0, 240),
       details: {
-        expectedContainers: ['section-body', 'content-body', 'law-content', 'main-content', 'article'],
+        expectedContainers: ['laws-body', 'section-body', 'content-body', 'law-content', 'main-content', 'article'],
         action: 'manual-review-required',
       },
     });
   }
 
-  const { effectiveDate, latestLegislation } = extractDates(rawOfficialText);
+  const extractedDates = extractDates(pageText);
+  const effectiveDate = extractLabeledValue(html, 'Effective') ?? extractedDates.effectiveDate;
+  const latestLegislation = extractLabeledValue(html, 'Latest\\s+Legislation') ?? extractedDates.latestLegislation;
 
   if (!effectiveDate) {
     warnings.push({
@@ -159,7 +170,8 @@ export const parseOrcSectionHtml = (html: string): ParsedOrcSection => {
   }
 
   const pdfUrl = pickFirst(html, [
-    /<a[^>]*href=["']([^"']+\.pdf)["'][^>]*>\s*(?:PDF|Download PDF|Official PDF)/i,
+    /<a[^>]*href=["']([^"']+\.pdf)["'][^>]*>\s*(?:PDF|Download PDF|Download Authenticated PDF|Official PDF)/i,
+    /<a[^>]*href=["']([^"']+\.pdf)["'][^>]*>/i,
   ]);
 
   if (!pdfUrl) {
