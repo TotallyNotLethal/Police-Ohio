@@ -83,6 +83,17 @@ const discoverSections = async (crawler: OrcCrawler): Promise<Map<string, Discov
   return discoveredSections;
 };
 
+const resetOrcContent = async () => {
+  await prisma.$transaction([
+    prisma.crossReference.deleteMany(),
+    prisma.favorite.deleteMany(),
+    prisma.orcSection.deleteMany(),
+    prisma.orcChapter.deleteMany(),
+    prisma.orcTitle.deleteMany(),
+    prisma.orcCode.deleteMany(),
+  ]);
+};
+
 const run = async () => {
   const crawler = new OrcCrawler({ logger: console.log, minDelayMs: 1_400, maxRetries: 8 });
   const sections = await discoverSections(crawler);
@@ -90,6 +101,9 @@ const run = async () => {
   if (sections.size === 0) {
     throw new Error('Unable to recursively discover any ORC sections from titles and chapters');
   }
+
+  await resetOrcContent();
+  console.log('[fullRebuild] cleared existing ORC title/chapter/section/reference/code data');
 
   const results = {
     visited: 0,
