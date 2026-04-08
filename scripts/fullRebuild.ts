@@ -1,13 +1,15 @@
 import { prisma } from '../src/lib/db/prisma';
-import { CODES_OHIO_BASE_URL, OrcCrawler, chapterUrl, titleUrl } from '../src/lib/orc/crawler';
+import { CODES_OHIO_BASE_URL, OrcCrawler, chapterUrl, titleUrl, sectionUrl } from '../src/lib/orc/crawler';
 import { detectChange } from '../src/lib/orc/change-detector';
 import { persistParsedSection } from '../src/lib/orc/indexer';
 import { deriveTaxonomyFromSection, normalizeSectionNumber } from '../src/lib/orc/normalizer';
 import { parseOrcSectionHtml } from '../src/lib/orc/parser';
 import { extractCrossReferences } from '../src/lib/orc/references';
 
-const TITLE_LINK_REGEX = /href=["']([^"']*title-(\d+[A-Za-z]?))["']/gi;
-const CHAPTER_LINK_REGEX = /href=["']([^"']*chapter-(\d+[A-Za-z]?))["']/gi;
+const TITLE_LINK_REGEX = /<table[^>]*class=["'][^"']*laws-table[^"']*["'][^>]*>[\s\S]*?<a[^>]*href=["']([^"']*title-(\d+[A-Za-z]?))["']/gi;
+const CHAPTER_LINK_REGEX = /<table[^>]*class=["'][^"']*laws-table[^"']*["'][^>]*>[\s\S]*?<a[^>]*href=["']([^"']*chapter-(\d+[A-Za-z]?))["']/gi;
+const SECTION_ENTRY_REGEX =
+  /<span[^>]*class=["'][^"']*content-head-text[^"']*["'][^>]*>[\s\S]*?<a[^>]*href=["']([^"']*section-([\d.\-A-Za-z]+))["'][^>]*>[\s\S]*?<\/a>[\s\S]*?<\/span>[\s\S]*?<div[^>]*class=["'][^"']*content-body[^"']*["'][^>]*>([\s\S]*?)<\/div>/gi;
 const SECTION_LINK_REGEX = /href=["']([^"']*section-([\d.\-A-Za-z]+))["']/gi;
 
 const toAbsoluteUrl = (href: string) =>
@@ -21,8 +23,14 @@ const extractMatches = (html: string, pattern: RegExp): Array<{ href: string; id
   return matches;
 };
 
-const discoverSectionNumbers = async (crawler: OrcCrawler): Promise<Set<string>> => {
-  const sectionNumbers = new Set<string>();
+type DiscoveredSection = {
+  sectionNumber: string;
+  sectionUrl: string;
+  embeddedHtml?: string;
+};
+
+const discoverSections = async (crawler: OrcCrawler): Promise<Map<string, DiscoveredSection>> => {
+  const discoveredSections = new Map<string, DiscoveredSection>();
 
   const landing = await crawler.fetchHtml(CODES_OHIO_BASE_URL, { id: 'root' });
   if (!landing) {
@@ -51,21 +59,36 @@ const discoverSectionNumbers = async (crawler: OrcCrawler): Promise<Set<string>>
         continue;
       }
 
+      for (const match of chapterPage.html.matchAll(SECTION_ENTRY_REGEX)) {
+        const sectionNumber = normalizeSectionNumber(match[2]);
+        discoveredSections.set(sectionNumber, {
+          sectionNumber,
+          sectionUrl: toAbsoluteUrl(match[1]),
+          embeddedHtml: match[3],
+        });
+      }
+
       for (const match of extractMatches(chapterPage.html, SECTION_LINK_REGEX)) {
-        sectionNumbers.add(normalizeSectionNumber(match.id));
+        const sectionNumber = normalizeSectionNumber(match.id);
+        if (!discoveredSections.has(sectionNumber)) {
+          discoveredSections.set(sectionNumber, {
+            sectionNumber,
+            sectionUrl: sectionUrl(sectionNumber),
+          });
+        }
       }
     }
   }
 
-  return sectionNumbers;
+  return discoveredSections;
 };
 
 const run = async () => {
   const crawler = new OrcCrawler({ logger: console.log, minDelayMs: 900, maxRetries: 5 });
-  const sectionNumbers = await discoverSectionNumbers(crawler);
+  const sections = await discoverSections(crawler);
 
-  if (sectionNumbers.size === 0) {
-    throw new Error('Unable to discover any ORC section URLs from titles/chapters');
+  if (sections.size === 0) {
+    throw new Error('Unable to recursively discover any ORC sections from titles and chapters');
   }
 
   const results = {
@@ -76,20 +99,29 @@ const run = async () => {
     warnings: 0,
   };
 
-  for (const sectionNumber of sectionNumbers) {
+  for (const section of sections.values()) {
     results.visited += 1;
 
     try {
-      const response = await crawler.fetchHtml(`https://codes.ohio.gov/ohio-revised-code/section-${sectionNumber}`, {
-        id: `section-${sectionNumber}`,
-      });
+      let parsed = section.embeddedHtml ? parseOrcSectionHtml(section.embeddedHtml) : undefined;
 
-      if (!response) {
+      if (!parsed?.rawOfficialText) {
+        const response = await crawler.fetchHtml(section.sectionUrl, {
+          id: `section-${section.sectionNumber}`,
+        });
+
+        if (!response) {
+          continue;
+        }
+
+        parsed = parseOrcSectionHtml(response.html);
+      }
+
+      if (!parsed) {
         continue;
       }
 
-      const parsed = parseOrcSectionHtml(response.html);
-      parsed.sectionNumber = parsed.sectionNumber || sectionNumber;
+      parsed.sectionNumber = parsed.sectionNumber || section.sectionNumber;
 
       const taxonomy = deriveTaxonomyFromSection(parsed.sectionNumber);
       const existing = await prisma.orcSection.findFirst({
@@ -118,7 +150,7 @@ const run = async () => {
       results.ingested += 1;
       results.warnings += parsed.warnings.length;
     } catch (error) {
-      console.error(`[fullRebuild] failed section ${sectionNumber}:`, error);
+      console.error(`[fullRebuild] failed section ${section.sectionNumber}:`, error);
       results.failed += 1;
     }
   }
