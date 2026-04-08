@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 
 import ChapterList from '../../../components/ChapterList';
 import { prisma } from '../../../lib/db/prisma';
+import { compareCodeNumbers } from '../../../lib/orc/sort';
 
 interface TitleDetailPageProps {
   params: Promise<{
@@ -23,7 +24,6 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           chapterNumber: true,
           name: true,
         },
-        orderBy: { chapterNumber: 'asc' },
       },
     },
   });
@@ -32,13 +32,15 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     notFound();
   }
 
+  const sortedChapters = [...title.chapters].sort((a, b) => compareCodeNumbers(a.chapterNumber, b.chapterNumber));
+
   return (
     <main className="space-y-4">
       <h1 className="text-2xl font-bold">
-        Title {title.titleNumber}: {title.name}
+        Title {title.titleNumber} | {title.name}
       </h1>
       <ChapterList
-        chapters={title.chapters.map((chapter) => ({
+        chapters={sortedChapters.map((chapter) => ({
           slug: chapter.slug,
           number: chapter.chapterNumber,
           title: chapter.name,

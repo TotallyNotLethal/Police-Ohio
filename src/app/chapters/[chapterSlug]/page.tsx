@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { prisma } from '../../../lib/db/prisma';
+import { compareCodeNumbers } from '../../../lib/orc/sort';
 
 interface ChapterPageProps {
   params: Promise<{
@@ -30,32 +31,32 @@ export default async function ChapterPage({ params }: ChapterPageProps) {
           heading: true,
           slug: true,
         },
-        orderBy: { sectionNumber: 'asc' },
       },
     },
-    orderBy: { chapterNumber: 'asc' },
   });
 
   if (!chapter) {
     notFound();
   }
 
+  const sortedSections = [...chapter.sections].sort((a, b) => compareCodeNumbers(a.sectionNumber, b.sectionNumber));
+
   return (
     <main className="space-y-4">
       <p className="text-sm text-slate-600">
         <Link href={`/titles/${chapter.title.slug}`} className="underline-offset-2 hover:underline">
-          Title {chapter.title.titleNumber}: {chapter.title.name}
+          Title {chapter.title.titleNumber} | {chapter.title.name}
         </Link>
       </p>
       <h1 className="text-2xl font-bold">
-        Chapter {chapter.chapterNumber}: {chapter.name}
+        Chapter {chapter.chapterNumber} | {chapter.name}
       </h1>
 
-      {chapter.sections.length === 0 ? (
+      {sortedSections.length === 0 ? (
         <p className="text-sm text-slate-600">No sections found for this chapter.</p>
       ) : (
         <ul className="space-y-2">
-          {chapter.sections.map((section) => (
+          {sortedSections.map((section) => (
             <li key={section.slug}>
               <Link
                 href={`/sections/${section.sectionNumber}`}
