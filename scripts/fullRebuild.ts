@@ -6,8 +6,8 @@ import { deriveTaxonomyFromSection, normalizeSectionNumber } from '../src/lib/or
 import { parseOrcSectionHtml } from '../src/lib/orc/parser';
 import { extractCrossReferences } from '../src/lib/orc/references';
 
-const TITLE_LINK_REGEX = /<table[^>]*class=["'][^"']*laws-table[^"']*["'][^>]*>[\s\S]*?<a[^>]*href=["']([^"']*title-(\d+[A-Za-z]?))["']/gi;
-const CHAPTER_LINK_REGEX = /<table[^>]*class=["'][^"']*laws-table[^"']*["'][^>]*>[\s\S]*?<a[^>]*href=["']([^"']*chapter-(\d+[A-Za-z]?))["']/gi;
+const TITLE_LINK_REGEX = /href=["']([^"']*title-([\dA-Za-z.\-]+))["']/gi;
+const CHAPTER_LINK_REGEX = /href=["']([^"']*chapter-([\dA-Za-z.\-]+))["']/gi;
 const SECTION_ENTRY_REGEX =
   /<span[^>]*class=["'][^"']*content-head-text[^"']*["'][^>]*>[\s\S]*?<a[^>]*href=["']([^"']*section-([\d.\-A-Za-z]+))["'][^>]*>[\s\S]*?<\/a>[\s\S]*?<\/span>[\s\S]*?<div[^>]*class=["'][^"']*content-body[^"']*["'][^>]*>([\s\S]*?)<\/div>/gi;
 const SECTION_LINK_REGEX = /href=["']([^"']*section-([\d.\-A-Za-z]+))["']/gi;
@@ -21,6 +21,14 @@ const extractMatches = (html: string, pattern: RegExp): Array<{ href: string; id
     matches.push({ href: toAbsoluteUrl(match[1]), id: match[2] });
   }
   return matches;
+};
+
+const extractUniqueIds = (html: string, pattern: RegExp): Set<string> => {
+  const ids = new Set<string>();
+  for (const match of extractMatches(html, pattern)) {
+    ids.add(match.id);
+  }
+  return ids;
 };
 
 type DiscoveredSection = {
@@ -37,10 +45,7 @@ const discoverSections = async (crawler: OrcCrawler): Promise<Map<string, Discov
     throw new Error('Unable to fetch ORC landing page');
   }
 
-  const discoveredTitles = new Set<string>();
-  for (const match of extractMatches(landing.html, TITLE_LINK_REGEX)) {
-    discoveredTitles.add(match.id);
-  }
+  const discoveredTitles = extractUniqueIds(landing.html, TITLE_LINK_REGEX);
 
   for (const titleNumber of discoveredTitles) {
     const titlePage = await crawler.fetchHtml(titleUrl(titleNumber), { id: `title-${titleNumber}` });
@@ -48,10 +53,7 @@ const discoverSections = async (crawler: OrcCrawler): Promise<Map<string, Discov
       continue;
     }
 
-    const discoveredChapters = new Set<string>();
-    for (const match of extractMatches(titlePage.html, CHAPTER_LINK_REGEX)) {
-      discoveredChapters.add(match.id);
-    }
+    const discoveredChapters = extractUniqueIds(titlePage.html, CHAPTER_LINK_REGEX);
 
     for (const chapterNumber of discoveredChapters) {
       const chapterPage = await crawler.fetchHtml(chapterUrl(chapterNumber), { id: `chapter-${chapterNumber}` });
@@ -95,7 +97,12 @@ const resetOrcContent = async () => {
 };
 
 const run = async () => {
-  const crawler = new OrcCrawler({ logger: console.log, minDelayMs: 1_400, maxRetries: 8 });
+  const crawler = new OrcCrawler({
+    logger: console.log,
+    minDelayMs: 1_400,
+    maxRetries: 8,
+    dedupeByBodyHash: false,
+  });
   const sections = await discoverSections(crawler);
 
   if (sections.size === 0) {
